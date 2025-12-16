@@ -96,7 +96,7 @@ export function RelatorioTreinamento({ deals }: RelatorioTreinamentoProps) {
       default: return "Sem status";
     }
   };
-
+  
   return (
     <div className="space-y-4 md:space-y-6">
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-2 md:gap-3">

@@ -1,11 +1,11 @@
-// src/components/reports/Dashboard.tsx - VERSÃO ÚNICA E CORRETA
-import { useMemo, useState } from "react";
+// src/components/reports/Dashboard.tsx - VERSÃO COM MAPEAMENTO DE CAMPOS
+import { useMemo, useState, useEffect } from "react";
 import { Deal } from "../../types";
 import { money } from "../../utils/calculations";
 import { Icons } from "../common/Icons";
 import { Input } from "../common/Input";
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, LineChart, Line } from "recharts";
-import { format, parseISO, eachDayOfInterval, startOfMonth, endOfMonth } from "date-fns";
+import { format, parseISO, eachDayOfInterval, startOfMonth, endOfMonth, isValid } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import { useLocalState } from "../../utils/storage";
 
@@ -24,38 +24,114 @@ type VendedorPerformance = {
   percentualAtingido: number;
 };
 
+// Função para converter snake_case para camelCase
+const snakeToCamel = (obj: any): Deal => {
+  if (!obj) return obj;
+  
+  return {
+    id: obj.id,
+    createdAt: obj.created_at || obj.createdAt || new Date().toISOString(),
+    owner_id: obj.owner_id || obj.ownerId,
+    owner: obj.owner,
+    status: obj.status,
+    produto: obj.produto,
+    empresa: obj.empresa,
+    cnpj: obj.cnpj,
+    responsavel: obj.responsavel,
+    whatsapp: obj.whatsapp,
+    email: obj.email,
+    formaPagamento: obj.forma_pagamento || obj.formaPagamento,
+    qtdConexoes: obj.qtd_conexoes || obj.qtdConexoes || 0,
+    qtdUsuarios: obj.qtd_usuarios || obj.qtdUsuarios || 0,
+    plataformaHabilitada: obj.plataforma_habilitada || obj.plataformaHabilitada || false,
+    qtdUraCanais: obj.qtd_ura_canais || obj.qtdUraCanais || 0,
+    qtdIaCanais: obj.qtd_ia_canais || obj.qtdIaCanais || 0,
+    qtdApiOficial: obj.qtd_api_oficial || obj.qtdApiOficial || 0,
+    leadsValor: obj.leads_valor || obj.leadsValor || 0,
+    desconto: obj.desconto || 0,
+    subtotal: obj.subtotal || 0,
+    total: obj.total || 0,
+    treinamentoData: obj.treinamento_data || obj.treinamentoData,
+    treinamentoHora: obj.treinamento_hora || obj.treinamentoHora,
+    treinamentoStatus: obj.treinamento_status || obj.treinamentoStatus || "pendente",
+    tipoVenda: obj.tipo_venda || obj.tipoVenda || "nova",
+    pagamentoConfirmado: obj.pagamento_confirmado || obj.pagamentoConfirmado || false,
+    agendaOk: obj.agenda_ok || obj.agendaOk || false,
+    qualidadeOK: obj.qualidade_ok || obj.qualidadeOK || false,
+    observacoes: obj.observacoes || [],
+    comprovante: obj.comprovante || ""
+  };
+};
+
 export function Dashboard({ deals, dateFrom, dateTo, owner }: DashboardProps) {
   const [metaMensal, setMetaMensal] = useLocalState<number>("vai_crm_meta_mensal", 50000);
   const [metaInput, setMetaInput] = useState(metaMensal.toString());
   
+  // Converter deals de snake_case para camelCase
+  const dealsNormalizados = useMemo(() => {
+    console.log("📥 Deals recebidos (bruto):", deals);
+    const normalizados = deals.map(snakeToCamel);
+    console.log("📥 Deals normalizados (camelCase):", normalizados);
+    return normalizados;
+  }, [deals]);
+  
+  // Para debug
+  useEffect(() => {
+    console.log("🔄 Dashboard atualizado com deals:", dealsNormalizados.length);
+    console.log("💰 Primeiro deal normalizado:", dealsNormalizados[0]);
+    console.log("💰 Total do primeiro deal:", dealsNormalizados[0]?.total);
+    console.log("💰 Pagamento confirmado?", dealsNormalizados[0]?.pagamentoConfirmado);
+  }, [dealsNormalizados]);
+  
   const filtered = useMemo(() => {
     const df = dateFrom ? new Date(dateFrom) : null;
     const dt = dateTo ? new Date(dateTo) : null;
-    return deals.filter((d) => {
+    return dealsNormalizados.filter((d) => {
       if (owner && d.owner !== owner) return false;
-      const when = new Date(d.createdAt);
-      if (df && when < df) return false;
-      if (dt && when > dt) return false;
-      return true;
+      
+      // Se não tiver createdAt, não incluir no filtro
+      if (!d.createdAt) return false;
+      
+      try {
+        const when = new Date(d.createdAt);
+        if (isNaN(when.getTime())) return false;
+        
+        if (df && when < df) return false;
+        if (dt && when > dt) return false;
+        return true;
+      } catch (error) {
+        console.warn("Erro ao processar data do deal:", d.createdAt, error);
+        return false;
+      }
     });
-  }, [deals, dateFrom, dateTo, owner]);
-
+  }, [dealsNormalizados, dateFrom, dateTo, owner]);
+  
   const hoje = new Date();
   const inicioMes = startOfMonth(hoje);
   const fimMes = endOfMonth(hoje);
   
-  const vendedores = Array.from(new Set(filtered.map(d => d.owner).filter(Boolean)));
+  // Extrair vendedores de forma segura
+  const vendedores = useMemo(() => {
+    const owners = filtered
+      .map(d => d?.owner)
+      .filter(owner => owner && typeof owner === 'string' && owner.trim() !== "");
+    
+    return [...new Set(owners)] as string[];
+  }, [filtered]);
   
+  // Performance dos vendedores com validações
   const performanceVendedores = useMemo(() => {
     const performance: VendedorPerformance[] = [];
     
     vendedores.forEach(vendedor => {
+      if (!vendedor || vendedor.trim() === "") return;
+      
       const vendasVendedor = filtered.filter(d => d.owner === vendedor);
       const vendasNormais = vendasVendedor.filter(d => d.status !== "ativo");
       const vendasRecorrencia = vendasVendedor.filter(d => d.status === "ativo");
       
-      const totalVendas = vendasNormais.reduce((sum, d) => sum + (d.total || 0), 0);
-      const totalRecorrencia = vendasRecorrencia.reduce((sum, d) => sum + (d.total || 0), 0);
+      const totalVendas = vendasNormais.reduce((sum, d) => sum + (Number(d.total) || 0), 0);
+      const totalRecorrencia = vendasRecorrencia.reduce((sum, d) => sum + (Number(d.total) || 0), 0);
       const metaVendedor = metaMensal / (vendedores.length || 1);
       const percentual = metaVendedor > 0 ? ((totalVendas + totalRecorrencia) / metaVendedor) * 100 : 0;
       
@@ -76,10 +152,30 @@ export function Dashboard({ deals, dateFrom, dateTo, owner }: DashboardProps) {
     const vendasPorData = new Map<string, number>();
     
     filtered.forEach(deal => {
-      const dataVenda = parseISO(deal.createdAt);
-      const dataStr = format(dataVenda, 'yyyy-MM-dd');
-      const valorAtual = vendasPorData.get(dataStr) || 0;
-      vendasPorData.set(dataStr, valorAtual + (deal.total || 0));
+      if (!deal.createdAt) {
+        console.warn("Deal sem createdAt encontrado:", deal);
+        return;
+      }
+      
+      try {
+        if (typeof deal.createdAt !== 'string') {
+          console.warn("createdAt não é uma string:", deal.createdAt);
+          return;
+        }
+        
+        const dataVenda = parseISO(deal.createdAt);
+        
+        if (!isValid(dataVenda)) {
+          console.warn("Data inválida após parseISO:", deal.createdAt);
+          return;
+        }
+        
+        const dataStr = format(dataVenda, 'yyyy-MM-dd');
+        const valorAtual = vendasPorData.get(dataStr) || 0;
+        vendasPorData.set(dataStr, valorAtual + (Number(deal.total) || 0));
+      } catch (error) {
+        console.warn("Erro ao processar data do deal:", deal.createdAt, error);
+      }
     });
     
     return dias.map(dia => {
@@ -94,15 +190,17 @@ export function Dashboard({ deals, dateFrom, dateTo, owner }: DashboardProps) {
     });
   }, [filtered, inicioMes, fimMes]);
   
+  // CÁLCULOS CORRIGIDOS - Usando Number() para garantir que seja número
   const faturado = filtered
     .filter((d) => d.pagamentoConfirmado)
     .reduce((s, d) => s + Number(d.total || 0), 0);
+    
   const ativos = filtered.filter((d) => d.status === "ativo").length;
   const inativos = filtered.filter((d) => d.status === "inativo").length;
   const atraso = filtered.filter((d) => d.status === "atraso").length;
   const pendentes = filtered.filter(d => d.status === "treinamento_pendente" || d.status === "treinamento_agendado").length;
   
-  const totalVendidoMes = filtered.reduce((sum, d) => sum + (d.total || 0), 0);
+  const totalVendidoMes = filtered.reduce((sum, d) => sum + Number(d.total || 0), 0);
   const percentualMeta = metaMensal > 0 ? (totalVendidoMes / metaMensal) * 100 : 0;
   const valorRestante = Math.max(0, metaMensal - totalVendidoMes);
   
@@ -142,8 +240,25 @@ export function Dashboard({ deals, dateFrom, dateTo, owner }: DashboardProps) {
     return `R$ ${num.toLocaleString('pt-BR')}`;
   };
 
+  // Função segura para gerar iniciais
+  const getIniciais = (nome: string | undefined) => {
+    if (!nome || nome.trim() === "") return "SV";
+    
+    const partes = nome.split(' ').filter(n => n && n.length > 0);
+    if (partes.length === 0) return "SV";
+    
+    const iniciais = partes
+      .map(n => n[0])
+      .join('')
+      .toUpperCase()
+      .substring(0, 2);
+    
+    return iniciais;
+  };
+
   return (
     <div className="space-y-6">
+      {/* Cards de Estatísticas */}
       <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
         <div className="rounded-xl border border-slate-200 bg-white p-3 md:p-4 shadow-sm">
           <div className="text-xs text-slate-500 font-medium truncate">Faturamento</div>
@@ -178,6 +293,7 @@ export function Dashboard({ deals, dateFrom, dateTo, owner }: DashboardProps) {
         </div>
       </div>
       
+      {/* Meta Mensal e Performance */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-4 md:p-5">
           <div className="flex flex-col sm:flex-row sm:items-center justify-between mb-6 gap-2">
@@ -355,6 +471,7 @@ export function Dashboard({ deals, dateFrom, dateTo, owner }: DashboardProps) {
         </div>
       </div>
       
+      {/* Vendas por Dia */}
       <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-4 md:p-5">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between mb-6 gap-2">
           <div className="flex items-center gap-2">
@@ -406,7 +523,8 @@ export function Dashboard({ deals, dateFrom, dateTo, owner }: DashboardProps) {
         </div>
       </div>
       
-      {performanceVendedores.length > 0 && (
+      {/* Desempenho Individual */}
+      {performanceVendedores.length > 0 ? (
         <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-4 md:p-5">
           <div className="flex flex-col sm:flex-row sm:items-center justify-between mb-6 gap-2">
             <div className="flex items-center gap-2">
@@ -421,85 +539,97 @@ export function Dashboard({ deals, dateFrom, dateTo, owner }: DashboardProps) {
           </div>
           
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 md:gap-4">
-            {performanceVendedores.map((vendedor, index) => (
-              <div 
-                key={vendedor.vendedor} 
-                className="border border-slate-200 rounded-lg p-3 md:p-4 hover:shadow-sm transition-shadow min-w-0"
-              >
-                <div className="flex items-center justify-between mb-3">
-                  <div className="flex items-center gap-2 min-w-0">
-                    <div className="w-8 h-8 md:w-10 md:h-10 rounded-full flex items-center justify-center text-white text-xs md:text-sm font-medium flex-shrink-0"
-                      style={{ backgroundColor: COLORS[index % COLORS.length] }}
-                    >
-                      {vendedor.vendedor.split(' ').map(n => n[0]).join('').toUpperCase()}
+            {performanceVendedores.map((vendedor, index) => {
+              if (!vendedor || !vendedor.vendedor) return null;
+              
+              return (
+                <div 
+                  key={vendedor.vendedor} 
+                  className="border border-slate-200 rounded-lg p-3 md:p-4 hover:shadow-sm transition-shadow min-w-0"
+                >
+                  <div className="flex items-center justify-between mb-3">
+                    <div className="flex items-center gap-2 min-w-0">
+                      <div className="w-8 h-8 md:w-10 md:h-10 rounded-full flex items-center justify-center text-white text-xs md:text-sm font-medium flex-shrink-0"
+                        style={{ backgroundColor: COLORS[index % COLORS.length] }}
+                      >
+                        {getIniciais(vendedor.vendedor)}
+                      </div>
+                      <div className="min-w-0">
+                        <span className="font-medium text-slate-900 text-sm md:text-base block truncate">
+                          {vendedor.vendedor}
+                        </span>
+                        <div className={`text-xs font-medium px-2 py-0.5 rounded-full inline-block truncate ${
+                          vendedor.percentualAtingido >= 100 
+                            ? "bg-green-100 text-green-700" 
+                            : "bg-yellow-100 text-yellow-700"
+                        }`}>
+                          {vendedor.percentualAtingido.toFixed(0)}% da meta
+                        </div>
+                      </div>
                     </div>
-                    <div className="min-w-0">
-                      <span className="font-medium text-slate-900 text-sm md:text-base block truncate">
-                        {vendedor.vendedor}
-                      </span>
-                      <div className={`text-xs font-medium px-2 py-0.5 rounded-full inline-block truncate ${
-                        vendedor.percentualAtingido >= 100 
-                          ? "bg-green-100 text-green-700" 
-                          : "bg-yellow-100 text-yellow-700"
-                      }`}>
-                        {vendedor.percentualAtingido.toFixed(0)}% da meta
+                  </div>
+                  
+                  <div className="space-y-2 md:space-y-3">
+                    <div>
+                      <div className="flex justify-between text-xs md:text-sm mb-1">
+                        <span className="text-slate-600 truncate">Novas Vendas:</span>
+                        <span className="font-medium text-blue-600 ml-2 text-right truncate">
+                          {formatarNumero(vendedor.vendas)}
+                        </span>
+                      </div>
+                      <div className="w-full bg-blue-100 rounded-full h-1.5">
+                        <div 
+                          className="h-1.5 rounded-full bg-blue-500 transition-all duration-500"
+                          style={{ 
+                            width: `${vendedor.meta > 0 ? Math.min((vendedor.vendas / vendedor.meta) * 100, 100) : 0}%` 
+                          }}
+                        />
+                      </div>
+                    </div>
+                    
+                    <div>
+                      <div className="flex justify-between text-xs md:text-sm mb-1">
+                        <span className="text-slate-600 truncate">Recorrência:</span>
+                        <span className="font-medium text-emerald-600 ml-2 text-right truncate">
+                          {formatarNumero(vendedor.recorrencia)}
+                        </span>
+                      </div>
+                      <div className="w-full bg-emerald-100 rounded-full h-1.5">
+                        <div 
+                          className="h-1.5 rounded-full bg-emerald-500 transition-all duration-500"
+                          style={{ 
+                            width: `${vendedor.meta > 0 ? Math.min((vendedor.recorrencia / vendedor.meta) * 100, 100) : 0}%` 
+                          }}
+                        />
+                      </div>
+                    </div>
+                    
+                    <div>
+                      <div className="flex justify-between text-xs md:text-sm mb-1">
+                        <span className="text-slate-600 truncate">Meta Individual:</span>
+                        <span className="font-medium text-purple-600 ml-2 text-right truncate">
+                          {formatarNumero(vendedor.meta)}
+                        </span>
+                      </div>
+                      <div className="w-full bg-purple-100 rounded-full h-1.5">
+                        <div 
+                          className="h-1.5 rounded-full bg-gradient-to-r from-blue-500 to-purple-500 transition-all duration-500"
+                          style={{ width: `${Math.min(vendedor.percentualAtingido, 100)}%` }}
+                        />
                       </div>
                     </div>
                   </div>
                 </div>
-                
-                <div className="space-y-2 md:space-y-3">
-                  <div>
-                    <div className="flex justify-between text-xs md:text-sm mb-1">
-                      <span className="text-slate-600 truncate">Novas Vendas:</span>
-                      <span className="font-medium text-blue-600 ml-2 text-right truncate">
-                        {formatarNumero(vendedor.vendas)}
-                      </span>
-                    </div>
-                    <div className="w-full bg-blue-100 rounded-full h-1.5">
-                      <div 
-                        className="h-1.5 rounded-full bg-blue-500 transition-all duration-500"
-                        style={{ 
-                          width: `${vendedor.meta > 0 ? Math.min((vendedor.vendas / vendedor.meta) * 100, 100) : 0}%` 
-                        }}
-                      />
-                    </div>
-                  </div>
-                  
-                  <div>
-                    <div className="flex justify-between text-xs md:text-sm mb-1">
-                      <span className="text-slate-600 truncate">Recorrência:</span>
-                      <span className="font-medium text-emerald-600 ml-2 text-right truncate">
-                        {formatarNumero(vendedor.recorrencia)}
-                      </span>
-                    </div>
-                    <div className="w-full bg-emerald-100 rounded-full h-1.5">
-                      <div 
-                        className="h-1.5 rounded-full bg-emerald-500 transition-all duration-500"
-                        style={{ 
-                          width: `${vendedor.meta > 0 ? Math.min((vendedor.recorrencia / vendedor.meta) * 100, 100) : 0}%` 
-                        }}
-                      />
-                    </div>
-                  </div>
-                  
-                  <div>
-                    <div className="flex justify-between text-xs md:text-sm mb-1">
-                      <span className="text-slate-600 truncate">Meta Individual:</span>
-                      <span className="font-medium text-purple-600 ml-2 text-right truncate">
-                        {formatarNumero(vendedor.meta)}
-                      </span>
-                    </div>
-                    <div className="w-full bg-purple-100 rounded-full h-1.5">
-                      <div 
-                        className="h-1.5 rounded-full bg-gradient-to-r from-blue-500 to-purple-500 transition-all duration-500"
-                        style={{ width: `${Math.min(vendedor.percentualAtingido, 100)}%` }}
-                      />
-                    </div>
-                  </div>
-                </div>
-              </div>
-            ))}
+              );
+            })}
+          </div>
+        </div>
+      ) : (
+        <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-4 md:p-5">
+          <div className="text-center py-8 text-slate-500">
+            {filtered.length > 0 
+              ? "Nenhum vendedor encontrado para o período selecionado." 
+              : "Nenhuma venda encontrada para o período selecionado."}
           </div>
         </div>
       )}

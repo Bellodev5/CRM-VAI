@@ -14,9 +14,11 @@ type DealFormProps = {
 };
 
 export function DealForm({ onSave, currentUser }: DealFormProps) {
+  console.log('🔵 DealForm montado. currentUser:', currentUser);
+  console.log('🔵 onSave function:', typeof onSave);
+
   const [d, setD] = useState<Deal>(() => {
     const blankDeal = BLANK_DEAL(currentUser.name, currentUser.id);
-    // Agora já começa com status pendente de treinamento
     return { ...blankDeal, status: "treinamento_pendente" };
   });
 
@@ -27,7 +29,6 @@ export function DealForm({ onSave, currentUser }: DealFormProps) {
 
   const set = (patch: Partial<Deal>) => setD((prev) => ({ ...prev, ...patch }));
 
-  // Usar vendedores fixos em vez dos do banco
   const vendedores = VENDEDORES_FIXOS;
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -41,25 +42,86 @@ export function DealForm({ onSave, currentUser }: DealFormProps) {
     }
   };
 
+// LOCALIZE A FUNÇÃO handleSubmit e SUBSTITUA completamente:
+
+const handleSubmit = (e: React.FormEvent) => {
+  e.preventDefault();
+  
+  console.log('🟢 ============ SUBMIT INICIADO ============');
+  console.log('🟢 Dados do formulário:', d);
+  console.log('🟢 Subtotal:', subtotal);
+  console.log('🟢 Total:', total);
+
+  // Validações simples
+  if (!d.produto) {
+    alert("⚠️ Selecione um produto!");
+    return;
+  }
+
+  if (!d.owner_id) {
+    alert("⚠️ Selecione um vendedor!");
+    return;
+  }
+
+  if (!d.empresa?.trim()) {
+    alert("⚠️ Preencha o nome da empresa!");
+    return;
+  }
+
+  if (!d.responsavel?.trim()) {
+    alert("⚠️ Preencha o nome do responsável!");
+    return;
+  }
+
+  if (!d.whatsapp?.trim()) {
+    alert("⚠️ Preencha o WhatsApp!");
+    return;
+  }
+
+  if (!d.formaPagamento) {
+    alert("⚠️ Selecione uma forma de pagamento!");
+    return;
+  }
+
+  // CORREÇÃO AQUI: Garantir que os valores numéricos sejam enviados
+  const dealParaSalvar: Deal = {
+    ...d,
+    subtotal: subtotal,
+    total: total, // ← O MAIS IMPORTANTE: envie o total calculado
+    status: "treinamento_pendente",
+    treinamentoStatus: "pendente",
+    tipoVenda: tipoVenda,
+    comprovante: comprovantePreview || "",
+    // Garante que seja número (parse simples)
+    qtdConexoes: Number(d.qtdConexoes) || 0,
+    qtdUsuarios: Number(d.qtdUsuarios) || 0,
+    qtdUraCanais: Number(d.qtdUraCanais) || 0,
+    qtdIaCanais: Number(d.qtdIaCanais) || 0,
+    qtdApiOficial: Number(d.qtdApiOficial) || 0,
+    leadsValor: Number(d.leadsValor) || 0,
+    desconto: Number(d.desconto) || 0
+  };
+
+  console.log('🟢 Deal para salvar (com valores):', dealParaSalvar);
+  console.log('🟢 Total a ser enviado:', dealParaSalvar.total);
+
+  try {
+    onSave(dealParaSalvar);
+    console.log('✅ Deal enviado com sucesso!');
+    
+    // Reseta o formulário
+    setD(BLANK_DEAL(currentUser.name, currentUser.id));
+    setTipoVenda("nova");
+    setComprovantePreview("");
+    
+    alert("✅ Venda cadastrada com sucesso!");
+  } catch (error) {
+    console.error('❌ Erro ao salvar:', error);
+    alert('❌ Erro: ' + error);
+  }
+};
   return (
-    <form
-      onSubmit={(e) => {
-        e.preventDefault();
-        onSave({ 
-          ...d, 
-          subtotal, 
-          total, 
-          status: "treinamento_pendente",
-          tipoVenda,
-          comprovante: comprovantePreview, // Salva como base64
-          treinamentoStatus: "pendente" // NOVO
-        });
-        setD(BLANK_DEAL(currentUser.name, currentUser.id));
-        setTipoVenda("nova");
-        setComprovantePreview("");
-      }}
-      className="grid md:grid-cols-2 gap-3 md:gap-4"
-    >
+    <form onSubmit={handleSubmit} className="grid md:grid-cols-2 gap-3 md:gap-4">
       {/* Dados do Sistema */}
       <div className="col-span-2 font-semibold text-slate-700 text-base md:text-lg border-b pb-2">
         Dados do Sistema
@@ -86,10 +148,11 @@ export function DealForm({ onSave, currentUser }: DealFormProps) {
         <Label>Vendedor Responsável *</Label>
         <Select
           required
-          value={d.owner_id}
+          value={d.owner_id || ""}
           onChange={(e: any) => {
             const userId = Number(e.target.value);
             const vendedor = vendedores.find(v => v.id === userId);
+            console.log('🔵 Vendedor selecionado:', vendedor);
             set({ 
               owner_id: userId, 
               owner: vendedor?.name || "" 
@@ -135,7 +198,7 @@ export function DealForm({ onSave, currentUser }: DealFormProps) {
           value={d.whatsapp}
           onChange={(e: any) => set({ whatsapp: e.target.value })}
           placeholder="(00) 00000-0000"
-                  className="text-sm md:text-base"
+          className="text-sm md:text-base"
         />
       </div>
 
@@ -382,22 +445,13 @@ export function DealForm({ onSave, currentUser }: DealFormProps) {
                     Clique para anexar comprovante
                   </p>
                   <p className="text-xs text-slate-500 mt-1">
-                    PNG, JPG ou PDF (obrigatório)
-                  </p>
-                  <p className="text-xs text-slate-400 mt-1">
-                    Máximo: 5MB
+                    PNG, JPG ou PDF (opcional)
                   </p>
                 </div>
               </div>
             )}
           </label>
         </div>
-        
-        {comprovantePreview && (
-          <div className="mt-2 text-xs text-slate-500">
-            <span className="font-medium">Atenção:</span> O comprovante será salvo junto com a venda.
-          </div>
-        )}
       </div>
 
       {/* Treinamento */}
@@ -444,7 +498,6 @@ export function DealForm({ onSave, currentUser }: DealFormProps) {
           <div className="text-xl md:text-2xl font-bold text-orange-600">{money(total)}</div>
         </div>
         
-        {/* Informações adicionais */}
         <div className="mt-2 pt-2 border-t border-orange-100">
           <div className="grid grid-cols-2 gap-2 text-xs text-slate-500">
             <div>
@@ -472,7 +525,7 @@ export function DealForm({ onSave, currentUser }: DealFormProps) {
             className="bg-orange-500 hover:bg-orange-600 text-white border-none px-5 md:px-6 py-2.5 md:py-3 text-base md:text-lg font-medium w-full sm:w-auto"
           >
             <Icons.Save className="inline mr-2" size={18} />
-            💾 Salvar venda
+            Salvar venda
           </Button>
         </div>
       </div>

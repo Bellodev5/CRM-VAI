@@ -1,152 +1,147 @@
-// vai-crm-backend/server.js
 const express = require('express');
 const cors = require('cors');
 const path = require('path');
 const dotenv = require('dotenv');
-const fs = require('fs');
 
 dotenv.config();
 
 const app = express();
 const PORT = process.env.PORT || 5000;
 
-// Middlewares
-app.use(cors());
+// ========================================
+// CONFIGURAÇÕES ESSENCIAIS
+// ========================================
+
+// CORS - PERMITE TODAS AS ORIGENS (desenvolvimento)
+app.use(cors({
+  origin: '*',
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization']
+}));
+
+// MIDDLEWARE PARA JSON
 app.use(express.json());
+app.use(express.urlencoded({ extended: true }));
 
-// Importa rotas
-const dealRoutes = require('./deal');
-const usersRoutes = require('./users');
+// ========================================
+// LOG DAS REQUISIÇÕES (DEBUG)
+// ========================================
+app.use((req, res, next) => {
+  const start = Date.now();
+  
+  console.log(`\n📨 ${req.method} ${req.url}`);
+  
+  if (req.method === 'POST' || req.method === 'PUT') {
+    console.log('📦 Body:', req.body);
+  }
+  
+  res.on('finish', () => {
+    const duration = Date.now() - start;
+    console.log(`✅ ${res.statusCode} ${req.method} ${req.url} - ${duration}ms`);
+  });
+  
+  next();
+});
 
-// Registra rotas
-app.use('/api/deals', dealRoutes);
-app.use('/api/users', usersRoutes);
+// ========================================
+// ROTAS DA API
+// ========================================
 
-// Rota de health check
+// Health Check
 app.get('/api/health', (req, res) => {
-  res.json({ 
-    status: 'API funcionando', 
+  res.json({
+    success: true,
+    message: 'API funcionando',
     timestamp: new Date().toISOString(),
-    mode: 'open-access (sem autenticação)'
+    environment: process.env.NODE_ENV || 'development'
   });
 });
 
-// Serve frontend (CAMINHO CORRIGIDO)
+// Importar rotas
+const dealRoutes = require('./deal');
+const usersRoutes = require('./users'); // Se tiver
+
+// Registrar rotas
+app.use('/api/deals', dealRoutes);
+
+if (usersRoutes) {
+  app.use('/api/users', usersRoutes);
+}
+
+// ========================================
+// ROTA DE FALLBACK PARA API NÃO ENCONTRADA
+// ========================================
+app.use('/api/*', (req, res) => {
+  res.status(404).json({
+    success: false,
+    message: 'Endpoint da API não encontrado',
+    availableEndpoints: [
+      'GET    /api/health',
+      'GET    /api/deals',
+      'POST   /api/deals',
+      'PUT    /api/deals/:id',
+      'DELETE /api/deals/:id',
+      'GET    /api/deals/diagnostico',
+      'POST   /api/deals/reset-teste'
+    ]
+  });
+});
+
+// ========================================
+// SERVIR FRONTEND (SE EXISTIR)
+// ========================================
 const frontendPath = path.join(__dirname, 'dist');
 
-// Verifica se a pasta dist existe
+const fs = require('fs');
 if (fs.existsSync(frontendPath)) {
-  console.log('✅ Pasta dist/ encontrada');
+  console.log('✅ Frontend encontrado em:', frontendPath);
   app.use(express.static(frontendPath));
   
   app.get('*', (req, res) => {
     res.sendFile(path.join(frontendPath, 'index.html'));
   });
 } else {
-  console.log('❌ Pasta dist/ não encontrada');
-  console.log('📁 Caminho esperado:', frontendPath);
-  console.log('💡 Execute: cd vai-crm-frontend && npm run build');
+  console.log('⚠️ Frontend não encontrado. Apenas API disponível.');
   
-  app.get('*', (req, res) => {
-    res.status(404).json({ 
-      message: 'Frontend não encontrado. Execute o build do frontend primeiro.',
-      expectedPath: frontendPath
-    });// vai-crm-backend/server.js
-const express = require('express');
-const cors = require('cors');
-const path = require('path');
-const dotenv = require('dotenv');
-const fs = require('fs');
-
-dotenv.config();
-
-const app = express();
-const PORT = process.env.PORT || 5000;
-
-// Middlewares
-app.use(cors());
-app.use(express.json());
-
-// Importa rotas da API
-const dealRoutes = require('./deal');
-const usersRoutes = require('./users');
-
-// Rota de health check (antes das rotas de API)
-app.get('/api/health', (req, res) => {
-  res.json({ 
-    status: 'API funcionando', 
-    timestamp: new Date().toISOString(),
-    mode: 'open-access (sem autenticação)'
-  });
-});
-
-// Registra rotas da API
-app.use('/api/deals', dealRoutes);
-app.use('/api/users', usersRoutes);
-
-// Serve arquivos estáticos do frontend
-const frontendPath = path.join(__dirname, 'dist');
-
-if (fs.existsSync(frontendPath)) {
-  console.log('✅ Pasta dist/ encontrada em:', frontendPath);
-  
-  // Servir arquivos estáticos com configuração correta
-  app.use(express.static(frontendPath, {
-    setHeaders: (res, filepath) => {
-      if (filepath.endsWith('.js')) {
-        res.setHeader('Content-Type', 'application/javascript');
-      } else if (filepath.endsWith('.css')) {
-        res.setHeader('Content-Type', 'text/css');
-      }
-    }
-  }));
-  
-  // SPA fallback - qualquer rota não-API retorna o index.html
-  app.get('*', (req, res) => {
-    // Não interceptar rotas de API
-    if (req.path.startsWith('/api')) {
-      return res.status(404).json({ message: 'API endpoint não encontrado' });
-    }
-    res.sendFile(path.join(frontendPath, 'index.html'));
-  });
-} else {
-  console.log('❌ Pasta dist/ não encontrada em:', frontendPath);
-  console.log('💡 Execute: cd vai-crm && npm run build');
-  
-  app.get('*', (req, res) => {
-    res.status(404).json({ 
-      message: 'Frontend não encontrado. Execute o build do frontend primeiro.',
-      expectedPath: frontendPath
+  app.get('/', (req, res) => {
+    res.json({
+      message: 'Backend funcionando!',
+      api: 'http://localhost:5000/api',
+      endpoints: [
+        'GET    /api/health',
+        'GET    /api/deals',
+        'POST   /api/deals',
+        'GET    /api/deals/diagnostico'
+      ]
     });
   });
 }
 
-app.listen(PORT, () => {
-  console.log(`🚀 Servidor BACKEND rodando na porta ${PORT}`);
-  console.log(`✅ Modo: Acesso aberto (SEM LOGIN)`);
-  console.log(`✅ Rotas disponíveis:`);
-  console.log(`   GET    /api/health`);
-  console.log(`   GET    /api/users`);
-  console.log(`   GET    /api/users/:id`);
-  console.log(`   GET    /api/deals`);
-  console.log(`   POST   /api/deals`);
-  console.log(`   PUT    /api/deals/:id`);
-  console.log(`   DELETE /api/deals/:id`);
-  console.log(`\n📡 Acesse: http://localhost:${PORT}`);
-});
+// ========================================
+// MANUSEIO DE ERROS GLOBAL
+// ========================================
+app.use((err, req, res, next) => {
+  console.error('🔥 ERRO GLOBAL:', err.message);
+  console.error(err.stack);
+  
+  res.status(500).json({
+    success: false,
+    message: 'Erro interno do servidor',
+    error: process.env.NODE_ENV === 'production' ? 'Internal server error' : err.message
   });
-}
+});
 
+// ========================================
+// INICIAR SERVIDOR
+// ========================================
 app.listen(PORT, () => {
-  console.log(`🚀 Servidor BACKEND rodando na porta ${PORT}`);
-  console.log(`✅ Modo: Acesso aberto (SEM LOGIN)`);
-  console.log(`✅ Rotas disponíveis:`);
-  console.log(`   GET    /api/health`);
-  console.log(`   GET    /api/users`);
-  console.log(`   GET    /api/users/:id`);
-  console.log(`   GET    /api/deals`);
-  console.log(`   POST   /api/deals`);
-  console.log(`   PUT    /api/deals/:id`);
-  console.log(`   DELETE /api/deals/:id`);
-  console.log(`\n📡 Acesse: http://localhost:${PORT}`);
+  console.log('\n' + '='.repeat(50));
+  console.log(`🚀 SERVIDOR INICIADO NA PORTA ${PORT}`);
+  console.log('='.repeat(50));
+  console.log('📡 Endpoints disponíveis:');
+  console.log(`   🌐 http://localhost:${PORT}`);
+  console.log(`   🩺 http://localhost:${PORT}/api/health`);
+  console.log(`   📊 http://localhost:${PORT}/api/deals/diagnostico`);
+  console.log(`   📋 http://localhost:${PORT}/api/deals`);
+  console.log('='.repeat(50) + '\n');
 });

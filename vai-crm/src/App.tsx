@@ -1,7 +1,8 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useLocalState } from "./utils/storage";
 import { Deal, User } from "./types";
 import { exportCSV } from "./utils/export";
+import { api } from "./services/api";
 import { Header } from "./components/layout/Header";
 import { Footer } from "./components/layout/Footer";
 import { DealForm } from "./components/forms/DealForm";
@@ -17,7 +18,9 @@ import { Button } from "./components/common/Button";
 import { Icons } from "./components/common/Icons";
 
 function App() {
-  const [deals, setDeals] = useLocalState<Deal[]>("vai_crm_deals_v2", []);
+  const [deals, setDeals] = useState<Deal[]>([]);
+  const [loading, setLoading] = useState(true);
+  
   const [settings] = useLocalState("vai_crm_settings_v2", {
     brand: {
       title: "VAI CRM",
@@ -37,18 +40,121 @@ function App() {
   const [dateTo, setDateTo] = useState("");
   const [ownerFilter, setOwnerFilter] = useState("");
 
-  const addDeal = (newDeal: Deal) => {
-    setDeals([newDeal, ...deals]);
+  // 🔥 CARREGAR VENDAS DA API AO INICIAR
+  useEffect(() => {
+    loadDeals();
+  }, []);
+
+  const loadDeals = async () => {
+    try {
+      console.log('🔵 Carregando vendas da API...');
+      setLoading(true);
+      const response = await api.get('/deals');
+      console.log('✅ Vendas carregadas:', response);
+      
+      // DEBUG: Verificar dados recebidos
+      if (response.data && response.data.length > 0) {
+        console.log('📊 Primeiro deal retornado:', response.data[0]);
+        console.log('📊 Total do primeiro deal:', response.data[0].total);
+        console.log('📊 Subtototal do primeiro deal:', response.data[0].subtotal);
+      }
+      
+      console.log('✅ Total de vendas carregadas:', response.data?.length || 0);
+      setDeals(response.data || []);
+    } catch (error) {
+      console.error('❌ Erro ao carregar vendas:', error);
+      alert('Erro ao carregar vendas do servidor');
+    } finally {
+      setLoading(false);
+    }
   };
 
-  const updateDeal = (updatedDeal: Deal) => {
-    setDeals(deals.map((d) => (d.id === updatedDeal.id ? updatedDeal : d)));
+  // 🔥 ADICIONAR VENDA NA API - VERSÃO CORRIGIDA SEM COMPROVANTE GRANDE
+  const addDeal = async (newDeal: Deal) => {
+    try {
+      console.log('🔵 Salvando venda na API:', newDeal);
+      
+      // DEBUG: Verificar valores recebidos
+      console.log('💰 Valor total recebido do DealForm:', newDeal.total);
+      console.log('💰 Valor subtotal recebido do DealForm:', newDeal.subtotal);
+      
+      // ⚠️ REMOVER COMPROVANTE PARA EVITAR REQUEST MUITO GRANDE
+      // O comprovante (base64) pode ser muito grande e causar "request entity too large"
+      const { comprovante, ...dealSemComprovante } = newDeal;
+      
+      // Garantir que o objeto tenha os campos corretos antes de enviar
+      const dealParaEnviar = {
+        ...dealSemComprovante,
+        // Garantir que os valores sejam números
+        total: Number(newDeal.total) || 0,
+        subtotal: Number(newDeal.subtotal) || 0,
+        qtdConexoes: Number(newDeal.qtdConexoes) || 0,
+        qtdUsuarios: Number(newDeal.qtdUsuarios) || 0,
+        qtdUraCanais: Number(newDeal.qtdUraCanais) || 0,
+        qtdIaCanais: Number(newDeal.qtdIaCanais) || 0,
+        qtdApiOficial: Number(newDeal.qtdApiOficial) || 0,
+        leadsValor: Number(newDeal.leadsValor) || 0,
+        desconto: Number(newDeal.desconto) || 0,
+        // Enviar comprovante apenas se for pequeno (menos de 5000 caracteres)
+        comprovante: newDeal.comprovante && newDeal.comprovante.length < 5000 
+          ? newDeal.comprovante 
+          : ""
+      };
+      
+      console.log('📤 Deal para enviar (sem comprovante grande):', dealParaEnviar);
+      console.log('💰 Total a ser enviado para o banco:', dealParaEnviar.total);
+      console.log('📏 Tamanho do comprovante:', newDeal.comprovante?.length || 0);
+      
+      const response = await api.post('/deals', dealParaEnviar);
+      console.log('✅ Resposta da API:', response);
+      
+      if (response.success) {
+        // Recarregar lista de vendas
+        await loadDeals();
+        alert('✅ Venda cadastrada com sucesso!');
+      } else {
+        alert('❌ Erro: ' + response.message);
+      }
+    } catch (error) {
+      console.error('❌ Erro ao salvar venda:', error);
+      alert('❌ Erro ao salvar venda no servidor. Verifique o console para detalhes.');
+    }
+  };
+
+  // 🔥 ATUALIZAR VENDA NA API
+  const updateDeal = async (updatedDeal: Deal) => {
+    try {
+      console.log('🔵 Atualizando venda na API:', updatedDeal);
+      
+      // ⚠️ REMOVER COMPROVANTE PARA EVITAR REQUEST MUITO GRANDE
+      const { comprovante, ...dealSemComprovante } = updatedDeal;
+      
+      // Garantir valores numéricos
+      const dealParaEnviar = {
+        ...dealSemComprovante,
+        total: Number(updatedDeal.total) || 0,
+        subtotal: Number(updatedDeal.subtotal) || 0
+      };
+      
+      await api.put(`/deals/${updatedDeal.id}`, dealParaEnviar);
+      console.log('✅ Venda atualizada no banco');
+      
+      // Atualizar localmente
+      setDeals(deals.map((d) => (d.id === updatedDeal.id ? dealParaEnviar : d)));
+    } catch (error) {
+      console.error('❌ Erro ao atualizar venda:', error);
+      alert('❌ Erro ao atualizar venda no servidor');
+    }
   };
 
   const confirmarPagamento = (dealId: string) => {
     const deal = deals.find(d => d.id === dealId);
     if (deal) {
-      updateDeal({ ...deal, pagamentoConfirmado: true });
+      const dealAtualizado = { 
+        ...deal, 
+        pagamentoConfirmado: true 
+      };
+      updateDeal(dealAtualizado);
     }
   };
 
@@ -102,6 +208,17 @@ function App() {
   );
 
   const experienciaAtiva = deals.filter(d => d.status === "experiencia");
+
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-slate-50 flex items-center justify-center">
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-orange-500 mx-auto mb-4"></div>
+          <p className="text-slate-600">Carregando vendas...</p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-slate-50">
